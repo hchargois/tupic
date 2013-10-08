@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+
+import argparse
+import re
+import urllib.request
+import xml.dom.minidom
+import os
+import subprocess
+import sys
+import json
+
+def citedelamusiquelive(url):
+    concert_id = re.search("\d{5,}", url).group()
+    xml_url = "http://citedelamusiquelive.tv/misc/Playlist.ashx?id=" + concert_id
+
+    xml_data = urllib.request.urlopen(xml_url).read()
+
+    dom = xml.dom.minidom.parseString(xml_data)
+
+    server = dom.getElementsByTagName("fichiers")[0].getAttribute("serveurstream")
+    files = map(lambda f:f.getAttribute("url_hd") or f.getAttribute("url"), dom.getElementsByTagName("fichier"))
+    names = map(lambda f:f.getElementsByTagName("titre")[0].childNodes[0].nodeValue, dom.getElementsByTagName("marqueur"))
+    title = dom.getElementsByTagName("titre")[0].childNodes[0].nodeValue
+    
+    return title, server, zip(names, files)
+
+def arteliveweb(url):
+    concert_page = urllib.request.urlopen(url).read().decode("utf8")
+    concert_id = re.search("eventId=(\d{3,})", concert_page).group(1)
+
+    xml_url = "http://download.liveweb.arte.tv/o21/liveweb/events/event-" + concert_id + ".xml"
+    xml_data = urllib.request.urlopen(xml_url).read()
+    dom = xml.dom.minidom.parseString(xml_data)
+
+    title = dom.getElementsByTagName("nameFr")[0].childNodes[0].nodeValue
+    file = dom.getElementsByTagName("urlHd")[0].childNodes[0].nodeValue
+    path_start_idx = file.find("MP4")
+    server = file[:path_start_idx]
+    path = file[path_start_idx:]
+
+    return title, server, [(title, path)]
+
+def medici(url):
+    title = url.split('/')[-1]
+    embed_page = "http://fr.medici.tv/" + title + "/embed/"
+    embed_page_data = urllib.request.urlopen(embed_page).read().decode('utf-8')
+
+    smil_url = re.search(r'http://[^"]*.smil', embed_page_data).group()
+    smil_data = urllib.request.urlopen(smil_url).read().decode('utf-8')
+    server = re.search(r'rtmp://[^"]*', smil_data).group()
+    path = re.search(r'mp4:[^"]*', smil_data).group()
+
+    return title, server, [(title, path)]
+
+def arteplus7(url):
+    html = urllib.request.urlopen(url).read().decode('utf-8')
+    json_url = re.search(r'http://[^"]*PLUS7-F/ALL/ALL.json', html).group()
+    j = json.loads(urllib.request.urlopen(json_url).read().decode('utf-8'))
+#    print(json.dumps(j, sort_keys=True, indent=4, separators=(',', ': ')))
+    title = j['videoJsonPlayer']['VTI']
+    try:
+        subtitle = j['videoJsonPlayer']['VSU']
+    except KeyError:
+        subtitle = title
+    streams = j['videoJsonPlayer']['VSR']
+    streams = list(filter(lambda s: s['mediaType'] == 'rtmp', streams.values()))
+
+    best_stream_size = max(map(lambda s:s['width'], streams))
+    best_streams = list(filter(lambda s:s['width'] == best_stream_size, streams))
+    if len(best_streams) > 1:
+        print("More than 1 stream found, please select manually:")
+        for i, v in enumerate(best_streams):
+            print('%d: %s' % (i, v['versionLibelle']))
+        sel = input('Select a stream by its id: ')
+        stream = best_streams[int(sel)]
+    else:
+        stream = best_streams[0]
+
+    server = stream['streamer']
+    path = 'mp4:' + stream['url']
+
+    return title, server, [(title + ' - ' + subtitle, path)]
+
+
+def rip(title, server, playlist):
+    title = title.replace('/', '-')
+    print("Ripping " + title + "...")
+
+    if os.path.exists(title):
+        print("Output directory already exists! Trying to resume downloads.")
+        resume = True
+    else:
+        os.mkdir(title)
+        resume = False
+    os.chdir(title)
+
+    for n,f in playlist:
+        n = n.replace('/', '-')
+        command = ["rtmpdump", "-r", server, "-y", f, "-o", n + ".mp4"]
+        if resume:
+            command.insert(1, "-e")
+        print("Running command:")
+        print(' '.join(command))
+        ret = subprocess.call(command)
+        if ret != 0:
+            print("Fail. You can try to resume the download by running the command again")
+
+def main():
+    parser = argparse.ArgumentParser(description='Rips a citedelamusiquelive.tv, liveweb.arte.tv, medici.tv (freely available) or www.arte.tv (arte+7) video. Requires rtmpdump.')
+    parser.add_argument('url', help='The url (of the webpage where the player is)')
+
+    args = parser.parse_args()
+
+    url = args.url
+
+    # title = title of the video/video series, this will be the name of the folder
+    # server = the rtmp server ("rtmp://hostname/app")
+    # playlist = list of tuples, first elements are titles of each part of the video, second elements are rtmp playpaths of that part)
+    if "citedelamusiquelive" in url:
+        title, server, playlist = citedelamusiquelive(url)
+    elif "liveweb.arte.tv" in url:
+        title, server, playlist = arteliveweb(url)
+    elif "medici.tv" in url:
+        title, server, playlist = medici(url)
+    elif "www.arte.tv" in url:
+        title, server, playlist = arteplus7(url)
+    else:
+        print("Sorry, this url isn't supported")
+        sys.exit(1)
+
+    rip(title, server, playlist)
+
+if __name__ == "__main__":
+    main()
+
