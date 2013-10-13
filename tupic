@@ -11,6 +11,8 @@ import subprocess
 import sys
 import json
 
+from errors import UnrecognizedSourceError
+
 # FUNCTIONS
 ########################################
 # ======================================
@@ -138,13 +140,17 @@ def main():
     elif "www.arte.tv" in url:
         title, server, playlist = arteplus7(url)
     else:
-        print("Sorry, this url isn't supported")
-        sys.exit(1)
+        raise UnrecognizedSourceError(url)
 
     rip(title, server, playlist)
 
 # SCRIPT
 ########################################
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exception:
+        print(exception)
+        sys.exit(1)
+
 
