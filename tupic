@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import json
+import types
 
 from errors import UnrecognizedSourceError
 
@@ -23,27 +24,10 @@ class Source(object):
         self.netloc = netloc
         self.desc = desc
 
-# CONSTANTS
+# METHODS
 ########################################
 # ======================================
-ARTELIVEWEB = Source('arteliveweb', 'liveweb.arte.tv')
-
-# ======================================
-ARTEPLUS7 = Source('arteplus7', 'www.arte.tv')
-
-ARTEPLUS7.desc = """The replay service of the Franco-German channel Arte.
-The shows are available up to seven days after being aired."""
-
-# ======================================
-CITEDELAMUSIQUELIVE = Source('citedelamusiquelive', 'www.citedelamusiquelive.tv')
-
-# ======================================
-MEDICI = Source('medici', 'medici.tv')
-
-# FUNCTIONS
-########################################
-# ======================================
-def citedelamusiquelive(url):
+def citedelamusiquelive(self, url):
     concert_id = re.search("\d{5,}", url).group()
     xml_url = "http://citedelamusiquelive.tv/misc/Playlist.ashx?id=" + concert_id
 
@@ -59,7 +43,7 @@ def citedelamusiquelive(url):
     return title, server, zip(names, files)
 
 # ======================================
-def arteliveweb(url):
+def arteliveweb(self, url):
     concert_page = urllib.request.urlopen(url).read().decode("utf8")
     concert_id = re.search("eventId=(\d{3,})", concert_page).group(1)
 
@@ -76,7 +60,7 @@ def arteliveweb(url):
     return title, server, [(title, path)]
 
 # ======================================
-def medici(url):
+def medici(self, url):
     title = url.split('/')[-1]
     embed_page = "http://fr.medici.tv/" + title + "/embed/"
     embed_page_data = urllib.request.urlopen(embed_page).read().decode('utf-8')
@@ -89,7 +73,7 @@ def medici(url):
     return title, server, [(title, path)]
 
 # ======================================
-def arteplus7(url):
+def arteplus7(self, url):
     html = urllib.request.urlopen(url).read().decode('utf-8')
     json_url = re.search(r'http://[^"]*PLUS7-F/ALL/ALL.json', html).group()
     j = json.loads(urllib.request.urlopen(json_url).read().decode('utf-8'))
@@ -119,6 +103,46 @@ def arteplus7(url):
     return title, server, [(title + ' - ' + subtitle, path)]
 
 
+# CONSTANTS
+########################################
+# ======================================
+ARTELIVEWEB = Source('arteliveweb', 'liveweb.arte.tv')
+
+ARTELIVEWEB.getFromPlayer = types.MethodType( arteliveweb, Source )
+
+# ======================================
+ARTEPLUS7 = Source('arteplus7', 'www.arte.tv')
+
+ARTEPLUS7.desc = """The replay service of the Franco-German channel Arte.
+The shows are available up to seven days after being aired."""
+
+ARTEPLUS7.getFromPlayer = types.MethodType( arteplus7, Source)
+
+# ======================================
+CITEDELAMUSIQUELIVE = Source('citedelamusiquelive', 'www.citedelamusiquelive.tv')
+
+CITEDELAMUSIQUELIVE.getFromPlayer = types.MethodType( citedelamusiquelive, Source )
+
+# ======================================
+MEDICI = Source('medici', 'medici.tv')
+
+MEDICI.getFromPlayer = types.MethodType( medici, Source )
+
+
+# ======================================
+SOURCES = {
+        ARTELIVEWEB.name:           ARTELIVEWEB,
+        ARTEPLUS7.name:             ARTEPLUS7,
+        CITEDELAMUSIQUELIVE.name:   CITEDELAMUSIQUELIVE,
+        MEDICI.name:                MEDICI,
+}
+
+# ======================================
+SOURCES_BYNETLOC = { SOURCES[s].netloc : SOURCES[s] for s in SOURCES }
+
+# FUNCTIONS
+########################################
+
 # ======================================
 def rip(title, server, playlist):
     title = title.replace('/', '-')
@@ -147,27 +171,29 @@ def rip(title, server, playlist):
 # MAIN
 ########################################
 def main():
-    parser = argparse.ArgumentParser(description='Rips a citedelamusiquelive.tv, liveweb.arte.tv, medici.tv (freely available) or www.arte.tv (arte+7) video. Requires rtmpdump.')
+    # Format the description
+    parserDesc = 'Rips a RTMP flux from one of the following services.\n'
+    for s in SOURCES:
+        parserDesc += ('\t' + s + ' (' + SOURCES[s].netloc +')\n')
+    parserDesc += 'Requires the rtmpdump tool.'
+
+    # Create the args parser
+    parser = argparse.ArgumentParser(description=parserDesc)
     parser.add_argument('url', help='The url (of the webpage where the player is)')
 
+    # Parse args
     args = parser.parse_args()
 
     # Direct download
-    url = args.url
+    url = urllib.request.urlparse(args.url, scheme='http')
 
     # title = title of the video/video series, this will be the name of the folder
     # server = the rtmp server ("rtmp://hostname/app")
     # playlist = list of tuples, first elements are titles of each part of the video, second elements are rtmp playpaths of that part)
-    if CITEDELAMUSIQUELIVE.netloc in url:
-        title, server, playlist = citedelamusiquelive(url)
-    elif ARTELIVEWEB.netloc in url:
-        title, server, playlist = arteliveweb(url)
-    elif MEDICI.netloc in url:
-        title, server, playlist = medici(url)
-    elif ARTEPLUS7.netloc in url:
-        title, server, playlist = arteplus7(url)
+    if url.netloc in SOURCES_BYNETLOC:
+        title, server, playlist = SOURCES_BYNETLOC[url.netloc].getFromPlayer(args.url)
     else:
-        raise UnrecognizedSourceError(url)
+        raise UnrecognizedSourceError(args.url)
 
     rip(title, server, playlist)
 
