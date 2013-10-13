@@ -13,6 +13,7 @@ import json
 import types
 
 from errors import UnrecognizedSourceError
+from features import GetfromplayerSourceFeature
 
 # CLASSES
 ########################################
@@ -24,11 +25,22 @@ class Source(object):
         self.netloc = netloc
         self.desc = desc
 
+        self.features = {}
+    
+    def add_feature(self, feature, dofeature=None):
+
+        self.features[feature.name] = feature
+
+        if dofeature:
+            self.features[feature.name].do = types.MethodType( dofeature, feature )
+            # Otherwise, the 'feature' object has a default 'do' function.
+        
+
 # METHODS
 ########################################
 # ======================================
-def citedelamusiquelive(self, url):
-    concert_id = re.search("\d{5,}", url).group()
+def citedelamusiquelive(self):
+    concert_id = re.search("\d{5,}", self.url).group()
     xml_url = "http://citedelamusiquelive.tv/misc/Playlist.ashx?id=" + concert_id
 
     xml_data = urllib.request.urlopen(xml_url).read()
@@ -43,8 +55,8 @@ def citedelamusiquelive(self, url):
     return title, server, zip(names, files)
 
 # ======================================
-def arteliveweb(self, url):
-    concert_page = urllib.request.urlopen(url).read().decode("utf8")
+def arteliveweb(self):
+    concert_page = urllib.request.urlopen(self.url).read().decode("utf8")
     concert_id = re.search("eventId=(\d{3,})", concert_page).group(1)
 
     xml_url = "http://download.liveweb.arte.tv/o21/liveweb/events/event-" + concert_id + ".xml"
@@ -60,8 +72,8 @@ def arteliveweb(self, url):
     return title, server, [(title, path)]
 
 # ======================================
-def medici(self, url):
-    title = url.split('/')[-1]
+def medici(self):
+    title = self.url.split('/')[-1]
     embed_page = "http://fr.medici.tv/" + title + "/embed/"
     embed_page_data = urllib.request.urlopen(embed_page).read().decode('utf-8')
 
@@ -73,8 +85,8 @@ def medici(self, url):
     return title, server, [(title, path)]
 
 # ======================================
-def arteplus7(self, url):
-    html = urllib.request.urlopen(url).read().decode('utf-8')
+def arteplus7(self):
+    html = urllib.request.urlopen(self.url).read().decode('utf-8')
     json_url = re.search(r'http://[^"]*PLUS7-F/ALL/ALL.json', html).group()
     j = json.loads(urllib.request.urlopen(json_url).read().decode('utf-8'))
 #    print(json.dumps(j, sort_keys=True, indent=4, separators=(',', ': ')))
@@ -108,7 +120,7 @@ def arteplus7(self, url):
 # ======================================
 ARTELIVEWEB = Source('arteliveweb', 'liveweb.arte.tv')
 
-ARTELIVEWEB.getFromPlayer = types.MethodType( arteliveweb, Source )
+ARTELIVEWEB.add_feature(GetfromplayerSourceFeature(), arteliveweb)
 
 # ======================================
 ARTEPLUS7 = Source('arteplus7', 'www.arte.tv')
@@ -116,17 +128,17 @@ ARTEPLUS7 = Source('arteplus7', 'www.arte.tv')
 ARTEPLUS7.desc = """The replay service of the Franco-German channel Arte.
 The shows are available up to seven days after being aired."""
 
-ARTEPLUS7.getFromPlayer = types.MethodType( arteplus7, Source)
+ARTEPLUS7.add_feature(GetfromplayerSourceFeature(), arteplus7)
 
 # ======================================
 CITEDELAMUSIQUELIVE = Source('citedelamusiquelive', 'www.citedelamusiquelive.tv')
 
-CITEDELAMUSIQUELIVE.getFromPlayer = types.MethodType( citedelamusiquelive, Source )
+CITEDELAMUSIQUELIVE.add_feature(GetfromplayerSourceFeature(), citedelamusiquelive)
 
 # ======================================
 MEDICI = Source('medici', 'medici.tv')
 
-MEDICI.getFromPlayer = types.MethodType( medici, Source )
+MEDICI.add_feature(GetfromplayerSourceFeature(), medici)
 
 
 # ======================================
@@ -191,7 +203,14 @@ def main():
     # server = the rtmp server ("rtmp://hostname/app")
     # playlist = list of tuples, first elements are titles of each part of the video, second elements are rtmp playpaths of that part)
     if url.netloc in SOURCES_BYNETLOC:
-        title, server, playlist = SOURCES_BYNETLOC[url.netloc].getFromPlayer(args.url)
+        getfromplayerFeat = SOURCES_BYNETLOC[url.netloc].features['getfromplayer']
+
+        # Pass the URL to use
+        getfromplayerFeat.url = args.url
+
+        # Launch the getfromplayer feature
+        title, server, playlist = getfromplayerFeat.do()
+
     else:
         raise UnrecognizedSourceError(args.url)
 
