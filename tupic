@@ -13,6 +13,33 @@ import json
 
 from errors import UnrecognizedSourceError
 
+# CLASSES
+########################################
+class Source(object):
+    """A source of shows."""
+
+    def __init__(self, name, netloc, desc=''):
+        self.name = name
+        self.netloc = netloc
+        self.desc = desc
+
+# CONSTANTS
+########################################
+# ======================================
+ARTELIVEWEB = Source('arteliveweb', 'liveweb.arte.tv')
+
+# ======================================
+ARTEPLUS7 = Source('arteplus7', 'www.arte.tv')
+
+ARTEPLUS7.desc = """The replay service of the Franco-German channel Arte.
+The shows are available up to seven days after being aired."""
+
+# ======================================
+CITEDELAMUSIQUELIVE = Source('citedelamusiquelive', 'www.citedelamusiquelive.tv')
+
+# ======================================
+MEDICI = Source('medici', 'medici.tv')
+
 # FUNCTIONS
 ########################################
 # ======================================
@@ -131,13 +158,13 @@ def main():
     # title = title of the video/video series, this will be the name of the folder
     # server = the rtmp server ("rtmp://hostname/app")
     # playlist = list of tuples, first elements are titles of each part of the video, second elements are rtmp playpaths of that part)
-    if "citedelamusiquelive" in url:
+    if CITEDELAMUSIQUELIVE.netloc in url:
         title, server, playlist = citedelamusiquelive(url)
-    elif "liveweb.arte.tv" in url:
+    elif ARTELIVEWEB.netloc in url:
         title, server, playlist = arteliveweb(url)
-    elif "medici.tv" in url:
+    elif MEDICI.netloc in url:
         title, server, playlist = medici(url)
-    elif "www.arte.tv" in url:
+    elif ARTEPLUS7.netloc in url:
         title, server, playlist = arteplus7(url)
     else:
         raise UnrecognizedSourceError(url)
