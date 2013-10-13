@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# IMPORTS
+########################################
 import argparse
 import re
 import urllib.request
@@ -9,6 +11,9 @@ import subprocess
 import sys
 import json
 
+# FUNCTIONS
+########################################
+# ======================================
 def citedelamusiquelive(url):
     concert_id = re.search("\d{5,}", url).group()
     xml_url = "http://citedelamusiquelive.tv/misc/Playlist.ashx?id=" + concert_id
@@ -24,6 +29,7 @@ def citedelamusiquelive(url):
     
     return title, server, zip(names, files)
 
+# ======================================
 def arteliveweb(url):
     concert_page = urllib.request.urlopen(url).read().decode("utf8")
     concert_id = re.search("eventId=(\d{3,})", concert_page).group(1)
@@ -40,6 +46,7 @@ def arteliveweb(url):
 
     return title, server, [(title, path)]
 
+# ======================================
 def medici(url):
     title = url.split('/')[-1]
     embed_page = "http://fr.medici.tv/" + title + "/embed/"
@@ -52,6 +59,7 @@ def medici(url):
 
     return title, server, [(title, path)]
 
+# ======================================
 def arteplus7(url):
     html = urllib.request.urlopen(url).read().decode('utf-8')
     json_url = re.search(r'http://[^"]*PLUS7-F/ALL/ALL.json', html).group()
@@ -82,6 +90,7 @@ def arteplus7(url):
     return title, server, [(title + ' - ' + subtitle, path)]
 
 
+# ======================================
 def rip(title, server, playlist):
     title = title.replace('/', '-')
     print("Ripping " + title + "...")
@@ -105,12 +114,16 @@ def rip(title, server, playlist):
         if ret != 0:
             print("Fail. You can try to resume the download by running the command again")
 
+
+# MAIN
+########################################
 def main():
     parser = argparse.ArgumentParser(description='Rips a citedelamusiquelive.tv, liveweb.arte.tv, medici.tv (freely available) or www.arte.tv (arte+7) video. Requires rtmpdump.')
     parser.add_argument('url', help='The url (of the webpage where the player is)')
 
     args = parser.parse_args()
 
+    # Direct download
     url = args.url
 
     # title = title of the video/video series, this will be the name of the folder
@@ -130,6 +143,8 @@ def main():
 
     rip(title, server, playlist)
 
+# SCRIPT
+########################################
 if __name__ == "__main__":
     main()
 
