@@ -12,8 +12,8 @@ import sys
 import json
 import types
 
-from errors import UnrecognizedSourceError
-from features import GetfromplayerSourceFeature
+from errors import UnrecognizedSourceError, UnsupportedSourceError, UnsupportedFeatureError
+from features import GetfromplayerSourceFeature, ListshowsSourceFeature
 
 # CLASSES
 ########################################
@@ -27,13 +27,16 @@ class Source(object):
 
         self.features = {}
     
-    def add_feature(self, feature, dofeature=None):
+    def add_feature(self, feature, dofeature=None, **kwargs):
 
         self.features[feature.name] = feature
 
         if dofeature:
             self.features[feature.name].do = types.MethodType( dofeature, feature )
             # Otherwise, the 'feature' object has a default 'do' function.
+
+        for attr in kwargs:
+            setattr( self.features[feature.name], attr, kwargs[attr])
         
 
 # METHODS
@@ -114,9 +117,34 @@ def arteplus7(self):
 
     return title, server, [(title + ' - ' + subtitle, path)]
 
+# ======================================
+def arteplus7_listshows(self):
+    """List the shows available for tyhe arteplus7 source"""
+
+    # Get the raw page
+    # TODO : separate the root URL from the arguments part.
+    jsonPage = urllib.request.urlopen(self.url).read().decode('utf-8')
+
+    # Parse the raw page
+    j = json.loads(jsonPage)
+
+    # The result is already nicely formatted.
+    #
+    # {'duration': 75, 'title': 'Patrice Chéreau, le corps au travail',
+    # 'airdate_long': 'dimanche 13 octobre à 14h50', 'image _url':
+    # 'http://www.arte.tv/papi/tvguide/images/7676790-CM/W940H530/7676790-CM.jpg',
+    # 'video_rights_until': 'Plus que 161 h32', 'url':
+    # '/guide/fr/041037-000/patrice-chereau-le-corps-au-travail',
+    # 'video_views': '2 242 vues', 'video_channels': 'Arts, Cultures &
+    # Spectacles', 'video_rank': 0, 'desc': 'Portrait intime de Patrice
+    # Chéreau, artiste à la puissance créatrice inépuisable.'}
+    return j["videos"]
 
 # CONSTANTS
 ########################################
+# ======================================
+OPTIONS_LISTSHOWS_DESC_LEN = 50
+
 # ======================================
 ARTELIVEWEB = Source('arteliveweb', 'liveweb.arte.tv')
 
@@ -129,6 +157,7 @@ ARTEPLUS7.desc = """The replay service of the Franco-German channel Arte.
 The shows are available up to seven days after being aired."""
 
 ARTEPLUS7.add_feature(GetfromplayerSourceFeature(), arteplus7)
+ARTEPLUS7.add_feature(ListshowsSourceFeature(), arteplus7_listshows, url='http://www.arte.tv/guide/fr/plus7.json?page=1&per_page=1000', desclen=OPTIONS_LISTSHOWS_DESC_LEN)
 
 # ======================================
 CITEDELAMUSIQUELIVE = Source('citedelamusiquelive', 'www.citedelamusiquelive.tv')
@@ -180,6 +209,74 @@ def rip(title, server, playlist):
             print("Fail. You can try to resume the download by running the command again")
 
 
+# ======================================
+def getfromplayer(url):
+    parsedURL = urllib.request.urlparse(url, scheme='http')
+
+    # title = title of the video/video series, this will be the name of the folder
+    # server = the rtmp server ("rtmp://hostname/app")
+    # playlist = list of tuples, first elements are titles of each part of the video, second elements are rtmp playpaths of that part)
+    if parsedURL.netloc not in SOURCES_BYNETLOC:
+        raise UnrecognizedSourceError(url)
+
+    source = SOURCES_BYNETLOC[parsedURL.netloc]
+
+    if 'getfromplayer' not in source.features:
+        raise UnsupportedFeatureError(source.name, 'getfromplayer')
+
+    sourcefeat = source.features['getfromplayer']
+
+    # Pass the URL to use
+    sourcefeat.url = url
+
+    # Launch the getfromplayer feature
+    title, server, playlist = sourcefeat.do()
+
+    # Download !
+    rip(title, server, playlist)
+
+
+# ======================================
+def listshows(sourcename):
+    """List the available shows for the given source."""
+    
+    # Checks that the source is supported
+    if sourcename not in SOURCES:
+        raise UnsupportedSourceError(sourcename)
+    
+    source = SOURCES[sourcename]
+
+    if 'listshows' not in source.features:
+        raise UnsupportedFeatureError(sourcename, 'listshows')
+
+    sourcefeat = source.features['listshows']
+
+    # Launch the listshows feature
+    shows = sourcefeat.do()
+
+    # Print back the shows nicely
+    for s in shows:
+        print(s['title'], end='')
+
+        if 'airdate_long' in s:
+            print( '/' + s['airdate_long'], end='')
+
+        if 'duration' in s:
+            print( ' (' + str(s['duration']) + ' mn)', end='')
+
+        if 'desc' in s:
+            if hasattr(sourcefeat, 'desclen'):
+                print( ' - ' + s['desc'][:sourcefeat.desclen], end='')
+            else:
+                print( ' - ' + s['desc'], end='')
+
+            # The nice touch...
+            if OPTIONS_LISTSHOWS_DESC_LEN< len(s['desc']):
+                print('...')
+            else:
+                print('')
+
+
 # MAIN
 ########################################
 def main():
@@ -190,31 +287,19 @@ def main():
     parserDesc += 'Requires the rtmpdump tool.'
 
     # Create the args parser
-    parser = argparse.ArgumentParser(description=parserDesc)
-    parser.add_argument('url', help='The url (of the webpage where the player is)')
+    parser = argparse.ArgumentParser(description=parserDesc, formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument('url', nargs='?', help='The url (of the webpage where the player is)') 
+    parser.add_argument('-l', '--list', metavar='SOURCE', help='List available shows')
 
     # Parse args
     args = parser.parse_args()
 
-    # Direct download
-    url = urllib.request.urlparse(args.url, scheme='http')
-
-    # title = title of the video/video series, this will be the name of the folder
-    # server = the rtmp server ("rtmp://hostname/app")
-    # playlist = list of tuples, first elements are titles of each part of the video, second elements are rtmp playpaths of that part)
-    if url.netloc in SOURCES_BYNETLOC:
-        getfromplayerFeat = SOURCES_BYNETLOC[url.netloc].features['getfromplayer']
-
-        # Pass the URL to use
-        getfromplayerFeat.url = args.url
-
-        # Launch the getfromplayer feature
-        title, server, playlist = getfromplayerFeat.do()
-
+    # List shows
+    if args.list:
+        listshows(args.list)
     else:
-        raise UnrecognizedSourceError(args.url)
-
-    rip(title, server, playlist)
+    # Direct download
+        getfromplayer(args.url)
 
 # SCRIPT
 ########################################
