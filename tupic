@@ -17,7 +17,7 @@ from features import GetfromplayerSourceFeature, ListshowsSourceFeature
 
 # CLASSES
 ########################################
-class Source(object):
+class Source():
     """A source of shows."""
 
     def __init__(self, name, netloc, desc=''):

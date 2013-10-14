@@ -1,19 +1,10 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #*-* encoding:utf8 *-*
-
-# IMPORTS
-########################################
-
-# CONSTANTS
-########################################
-
-# FUNCTIONS
-########################################
 
 # CLASSES
 ########################################
 # ======================================
-class SourceFeature(object):
+class SourceFeature():
 	"""An operation available for a Source"""
 
 	def __init__(self, name):
