@@ -10,10 +10,11 @@ import os
 import subprocess
 import sys
 import json
+import codecs
 import types
 
-from errors import UnrecognizedSourceError, UnsupportedSourceError, UnsupportedFeatureError
-from features import GetfromplayerSourceFeature, ListshowsSourceFeature
+from errors import UnrecognizedSourceError, UnsupportedSourceError, UnsupportedFeatureError, MissingOptionError
+from features import GetfromplayerSourceFeature, ListshowsSourceFeature, InfoshowsSourceFeature
 
 # CLASSES
 ########################################
@@ -118,17 +119,16 @@ def arteplus7(self):
     return title, server, [(title + ' - ' + subtitle, path)]
 
 # ======================================
-def arteplus7_listshows(self):
-    """List the shows available for tyhe arteplus7 source"""
-
+def _arteplus7_getshowslist(url):
+    """Get the shows list from a json page."""
     # Get the raw page
     # TODO : separate the root URL from the arguments part.
-    jsonPage = urllib.request.urlopen(self.url).read().decode('utf-8')
+    jsonPage = urllib.request.urlopen(url).read().decode('utf-8')
 
     # Parse the raw page
     j = json.loads(jsonPage)
 
-    # The result is already nicely formatted.
+    # The result is nicely formatted.
     #
     # {'duration': 75, 'title': 'Patrice Chéreau, le corps au travail',
     # 'airdate_long': 'dimanche 13 octobre à 14h50', 'image _url':
@@ -137,8 +137,56 @@ def arteplus7_listshows(self):
     # '/guide/fr/041037-000/patrice-chereau-le-corps-au-travail',
     # 'video_views': '2 242 vues', 'video_channels': 'Arts, Cultures &
     # Spectacles', 'video_rank': 0, 'desc': 'Portrait intime de Patrice
-    # Chéreau, artiste à la puissance créatrice inépuisable.'}
-    return j["videos"]
+    # Chéreau, artiste à la puissance créatrice inépuisable.'
+    results = j["videos"]
+    
+    # Filter out 'null' values
+    return map(lambda res: {k:v for k,v in res.items() if v is not None}, results)
+    
+ # Filters
+# ======================================
+def _arteplus7_filter_availableFor(show):
+    if 'video_rights_until' in show:
+        m = re.match('Plus que (.*)', show['video_rights_until'])
+        if m:
+            show['video_rights_until'] = m.group(1)
+    
+    return show
+        
+# ======================================
+def _arteplus7_filter_videoViews(show):
+    if 'video_views' in show:
+        m = re.match('(.*) vues', show['video_views'])
+        if m:
+            show['video_views'] = m.group(1)
+    
+    return show
+ 
+# ======================================
+def arteplus7_listshows(self):
+    """List the shows available for the arteplus7 source"""
+
+    # TODO : rework the shows list a little ?
+    return _arteplus7_getshowslist(self.url)
+    
+# ======================================
+def arteplus7_infoshows(self):
+    """List the shows available for tyhe arteplus7 source"""
+
+    shows = _arteplus7_getshowslist(self.url)
+    
+    def matchTitleOrAirdate(pattern, show):
+        if re.match(self.pattern, show['title']):
+            return True
+        
+        if 'airdate_long' in show and re.match(self.pattern, show['airdate_long']):
+            return True
+        
+        return False
+        
+    results = [ s for s in shows if matchTitleOrAirdate(self.pattern, s)]
+    
+    return map(lambda s: _arteplus7_filter_availableFor(_arteplus7_filter_videoViews(s)), results)
 
 # CONSTANTS
 ########################################
@@ -158,6 +206,7 @@ The shows are available up to seven days after being aired."""
 
 ARTEPLUS7.add_feature(GetfromplayerSourceFeature(), arteplus7)
 ARTEPLUS7.add_feature(ListshowsSourceFeature(), arteplus7_listshows, url='http://www.arte.tv/guide/fr/plus7.json?page=1&per_page=1000', desclen=OPTIONS_LISTSHOWS_DESC_LEN)
+ARTEPLUS7.add_feature(InfoshowsSourceFeature(), arteplus7_infoshows, url='http://www.arte.tv/guide/fr/plus7.json?page=1&per_page=1000')
 
 # ======================================
 CITEDELAMUSIQUELIVE = Source('citedelamusiquelive', 'www.citedelamusiquelive.tv')
@@ -259,7 +308,7 @@ def listshows(sourcename):
         print(s['title'], end='')
 
         if 'airdate_long' in s:
-            print( '/' + s['airdate_long'], end='')
+            print( ' /' + str(s['airdate_long']), end='')
 
         if 'duration' in s:
             print( ' (' + str(s['duration']) + ' mn)', end='')
@@ -276,7 +325,74 @@ def listshows(sourcename):
             else:
                 print('')
 
+# ======================================
+def infoshows(sourcename, pattern):
+    """Get detailed infos on the selected shows for the given source."""
+    
+    # Checks that the source is supported
+    if sourcename not in SOURCES:
+        raise UnsupportedSourceError(sourcename)
+        
+    source = SOURCES[sourcename]
 
+    if 'infoshows' not in source.features:
+        raise UnsupportedFeatureError(sourcename, 'infoshows')
+
+    sourcefeat = source.features['infoshows']
+    
+    # Pass the pattern
+    sourcefeat.pattern = pattern
+    
+    # Launch the infoshows feature
+    shows = sourcefeat.do()
+
+    # Print back the shows nicely
+    for s in shows:
+        print(s['title'])
+        print('-' * len(s['title']))
+        
+        if 'duration' in s:
+            print(str(s['duration']) + ' mn', end='')
+        
+        if 'airdate_long' in s:
+            if 'duration' in s:
+                print(', ', end='')
+                
+            print('first aired ' + str(s['airdate_long']), end='')
+        
+        if 'video_rights_until' in s:
+            if 'duration' in s or 'airdate_long' in s:
+                print(' ', end='')
+            
+            print('(available for ' + str(s['video_rights_until']) + ')', end='')
+            
+        print('')
+        
+        if 'video_channels' in s:
+            print('Tags: ' + s['video_channels'])
+        
+        if 'url' in s:    
+            print('Link: ' + 'http://' + source.netloc + s['url'])
+            
+        print('')
+        
+        if 'desc' in s:
+            print(s['desc'])
+            
+        print('')
+        
+        if 'video_views' in s:
+            print(str(s['video_views']) + ' views', end='')
+            
+        if 'video_rank' in s:
+            if 'video_views' in s:
+                print(' - ', end='')
+                
+            print('video got rank ' + str(s['video_rank']) + ' on ' + source.netloc, end='')
+         
+        print('')
+        print('')
+    
 # MAIN
 ########################################
 def main():
@@ -289,16 +405,35 @@ def main():
     # Create the args parser
     parser = argparse.ArgumentParser(description=parserDesc, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('url', nargs='?', help='The url (of the webpage where the player is)') 
-    parser.add_argument('-l', '--list', metavar='SOURCE', help='List available shows')
+    parser.add_argument('-s', '--source', help='The source to use')
+    parser.add_argument('-l', '--list', action='store_true', help='List available shows')
+    parser.add_argument('-i', '--infos', metavar='SHOW_PATTERN', help='Get detailed infos on shows matching SHOW_PATTERN')
 
     # Parse args
     args = parser.parse_args()
 
+    # List shows checks
+    if args.list:
+        if not args.source:
+            raise MissingOptionError('--source', '--list')
+        
+    # Info shows checks
+    if args.infos:
+        if not args.source:
+            raise MissingOptionError('--source', '--infos')
+
+            
     # List shows
     if args.list:
-        listshows(args.list)
-    else:
-    # Direct download
+        listshows(args.source)
+     
+    # Info shows
+    if args.infos:
+        infoshows(args.source, args.infos)
+        
+        
+    # Get from player (direct dl)
+    if args.url:
         getfromplayer(args.url)
 
 # SCRIPT
@@ -309,5 +444,3 @@ if __name__ == "__main__":
     except Exception as exception:
         print(exception)
         sys.exit(1)
-
-

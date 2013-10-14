@@ -37,7 +37,7 @@ class ListshowsSourceFeature(SourceFeature):
 		
 
 	def do(self):
-		"""Should return a list of dictionnaries containing info on
+		"""Should return a list of dictionnaries containing infos on
 		each show.
 		Only the 'title' element of the dictionnary, which MUST
 		contain the title of the show, is mandatory.
@@ -61,3 +61,16 @@ class ListshowsSourceFeature(SourceFeature):
 
 		return []
 
+# ======================================
+class InfoshowsSourceFeature(SourceFeature):
+    """Get detailed infos on a show"""
+    def __init__(self):
+        super(InfoshowsSourceFeature, self).__init__('infoshows')
+        
+    def do(self):
+        """Should return a dictionnary containing detailed infos on
+        a specific show.
+        The infos are similar to those of the 'listshows'
+        SourceFeature."""
+        
+        return {}

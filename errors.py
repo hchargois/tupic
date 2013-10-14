@@ -30,3 +30,13 @@ class UnsupportedFeatureError(Exception):
 
 	def __str__(self):
 		return 'The \'' + self.feature + '\' Feature is not available for the \'' + self.source +'\' Source'
+
+class MissingOptionError(Exception):
+    """An option is missing from the comand line."""
+    
+    def __init__(self, option, operation):
+        self.option = option
+        self.operation = operation
+
+    def __str__(self):
+        return 'The \'' + self.option + '\' is needed for the \'' + self.operation + '\' operation'
