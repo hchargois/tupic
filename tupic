@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# IMPORTS
+########################################
 import argparse
 import re
 import urllib.request
@@ -8,9 +10,40 @@ import os
 import subprocess
 import sys
 import json
+import types
 
-def citedelamusiquelive(url):
-    concert_id = re.search("\d{5,}", url).group()
+from errors import UnrecognizedSourceError, UnsupportedSourceError, UnsupportedFeatureError
+from features import GetfromplayerSourceFeature, ListshowsSourceFeature
+
+# CLASSES
+########################################
+class Source(object):
+    """A source of shows."""
+
+    def __init__(self, name, netloc, desc=''):
+        self.name = name
+        self.netloc = netloc
+        self.desc = desc
+
+        self.features = {}
+    
+    def add_feature(self, feature, dofeature=None, **kwargs):
+
+        self.features[feature.name] = feature
+
+        if dofeature:
+            self.features[feature.name].do = types.MethodType( dofeature, feature )
+            # Otherwise, the 'feature' object has a default 'do' function.
+
+        for attr in kwargs:
+            setattr( self.features[feature.name], attr, kwargs[attr])
+        
+
+# METHODS
+########################################
+# ======================================
+def citedelamusiquelive(self):
+    concert_id = re.search("\d{5,}", self.url).group()
     xml_url = "http://citedelamusiquelive.tv/misc/Playlist.ashx?id=" + concert_id
 
     xml_data = urllib.request.urlopen(xml_url).read()
@@ -24,8 +57,9 @@ def citedelamusiquelive(url):
     
     return title, server, zip(names, files)
 
-def arteliveweb(url):
-    concert_page = urllib.request.urlopen(url).read().decode("utf8")
+# ======================================
+def arteliveweb(self):
+    concert_page = urllib.request.urlopen(self.url).read().decode("utf8")
     concert_id = re.search("eventId=(\d{3,})", concert_page).group(1)
 
     xml_url = "http://download.liveweb.arte.tv/o21/liveweb/events/event-" + concert_id + ".xml"
@@ -40,8 +74,9 @@ def arteliveweb(url):
 
     return title, server, [(title, path)]
 
-def medici(url):
-    title = url.split('/')[-1]
+# ======================================
+def medici(self):
+    title = self.url.split('/')[-1]
     embed_page = "http://fr.medici.tv/" + title + "/embed/"
     embed_page_data = urllib.request.urlopen(embed_page).read().decode('utf-8')
 
@@ -52,8 +87,9 @@ def medici(url):
 
     return title, server, [(title, path)]
 
-def arteplus7(url):
-    html = urllib.request.urlopen(url).read().decode('utf-8')
+# ======================================
+def arteplus7(self):
+    html = urllib.request.urlopen(self.url).read().decode('utf-8')
     json_url = re.search(r'http://[^"]*PLUS7-F/ALL/ALL.json', html).group()
     j = json.loads(urllib.request.urlopen(json_url).read().decode('utf-8'))
 #    print(json.dumps(j, sort_keys=True, indent=4, separators=(',', ': ')))
@@ -81,7 +117,74 @@ def arteplus7(url):
 
     return title, server, [(title + ' - ' + subtitle, path)]
 
+# ======================================
+def arteplus7_listshows(self):
+    """List the shows available for tyhe arteplus7 source"""
 
+    # Get the raw page
+    # TODO : separate the root URL from the arguments part.
+    jsonPage = urllib.request.urlopen(self.url).read().decode('utf-8')
+
+    # Parse the raw page
+    j = json.loads(jsonPage)
+
+    # The result is already nicely formatted.
+    #
+    # {'duration': 75, 'title': 'Patrice Chéreau, le corps au travail',
+    # 'airdate_long': 'dimanche 13 octobre à 14h50', 'image _url':
+    # 'http://www.arte.tv/papi/tvguide/images/7676790-CM/W940H530/7676790-CM.jpg',
+    # 'video_rights_until': 'Plus que 161 h32', 'url':
+    # '/guide/fr/041037-000/patrice-chereau-le-corps-au-travail',
+    # 'video_views': '2 242 vues', 'video_channels': 'Arts, Cultures &
+    # Spectacles', 'video_rank': 0, 'desc': 'Portrait intime de Patrice
+    # Chéreau, artiste à la puissance créatrice inépuisable.'}
+    return j["videos"]
+
+# CONSTANTS
+########################################
+# ======================================
+OPTIONS_LISTSHOWS_DESC_LEN = 50
+
+# ======================================
+ARTELIVEWEB = Source('arteliveweb', 'liveweb.arte.tv')
+
+ARTELIVEWEB.add_feature(GetfromplayerSourceFeature(), arteliveweb)
+
+# ======================================
+ARTEPLUS7 = Source('arteplus7', 'www.arte.tv')
+
+ARTEPLUS7.desc = """The replay service of the Franco-German channel Arte.
+The shows are available up to seven days after being aired."""
+
+ARTEPLUS7.add_feature(GetfromplayerSourceFeature(), arteplus7)
+ARTEPLUS7.add_feature(ListshowsSourceFeature(), arteplus7_listshows, url='http://www.arte.tv/guide/fr/plus7.json?page=1&per_page=1000', desclen=OPTIONS_LISTSHOWS_DESC_LEN)
+
+# ======================================
+CITEDELAMUSIQUELIVE = Source('citedelamusiquelive', 'www.citedelamusiquelive.tv')
+
+CITEDELAMUSIQUELIVE.add_feature(GetfromplayerSourceFeature(), citedelamusiquelive)
+
+# ======================================
+MEDICI = Source('medici', 'medici.tv')
+
+MEDICI.add_feature(GetfromplayerSourceFeature(), medici)
+
+
+# ======================================
+SOURCES = {
+        ARTELIVEWEB.name:           ARTELIVEWEB,
+        ARTEPLUS7.name:             ARTEPLUS7,
+        CITEDELAMUSIQUELIVE.name:   CITEDELAMUSIQUELIVE,
+        MEDICI.name:                MEDICI,
+}
+
+# ======================================
+SOURCES_BYNETLOC = { SOURCES[s].netloc : SOURCES[s] for s in SOURCES }
+
+# FUNCTIONS
+########################################
+
+# ======================================
 def rip(title, server, playlist):
     title = title.replace('/', '-')
     print("Ripping " + title + "...")
@@ -105,31 +208,106 @@ def rip(title, server, playlist):
         if ret != 0:
             print("Fail. You can try to resume the download by running the command again")
 
-def main():
-    parser = argparse.ArgumentParser(description='Rips a citedelamusiquelive.tv, liveweb.arte.tv, medici.tv (freely available) or www.arte.tv (arte+7) video. Requires rtmpdump.')
-    parser.add_argument('url', help='The url (of the webpage where the player is)')
 
-    args = parser.parse_args()
-
-    url = args.url
+# ======================================
+def getfromplayer(url):
+    parsedURL = urllib.request.urlparse(url, scheme='http')
 
     # title = title of the video/video series, this will be the name of the folder
     # server = the rtmp server ("rtmp://hostname/app")
     # playlist = list of tuples, first elements are titles of each part of the video, second elements are rtmp playpaths of that part)
-    if "citedelamusiquelive" in url:
-        title, server, playlist = citedelamusiquelive(url)
-    elif "liveweb.arte.tv" in url:
-        title, server, playlist = arteliveweb(url)
-    elif "medici.tv" in url:
-        title, server, playlist = medici(url)
-    elif "www.arte.tv" in url:
-        title, server, playlist = arteplus7(url)
-    else:
-        print("Sorry, this url isn't supported")
-        sys.exit(1)
+    if parsedURL.netloc not in SOURCES_BYNETLOC:
+        raise UnrecognizedSourceError(url)
 
+    source = SOURCES_BYNETLOC[parsedURL.netloc]
+
+    if 'getfromplayer' not in source.features:
+        raise UnsupportedFeatureError(source.name, 'getfromplayer')
+
+    sourcefeat = source.features['getfromplayer']
+
+    # Pass the URL to use
+    sourcefeat.url = url
+
+    # Launch the getfromplayer feature
+    title, server, playlist = sourcefeat.do()
+
+    # Download !
     rip(title, server, playlist)
 
+
+# ======================================
+def listshows(sourcename):
+    """List the available shows for the given source."""
+    
+    # Checks that the source is supported
+    if sourcename not in SOURCES:
+        raise UnsupportedSourceError(sourcename)
+    
+    source = SOURCES[sourcename]
+
+    if 'listshows' not in source.features:
+        raise UnsupportedFeatureError(sourcename, 'listshows')
+
+    sourcefeat = source.features['listshows']
+
+    # Launch the listshows feature
+    shows = sourcefeat.do()
+
+    # Print back the shows nicely
+    for s in shows:
+        print(s['title'], end='')
+
+        if 'airdate_long' in s:
+            print( '/' + s['airdate_long'], end='')
+
+        if 'duration' in s:
+            print( ' (' + str(s['duration']) + ' mn)', end='')
+
+        if 'desc' in s:
+            if hasattr(sourcefeat, 'desclen'):
+                print( ' - ' + s['desc'][:sourcefeat.desclen], end='')
+            else:
+                print( ' - ' + s['desc'], end='')
+
+            # The nice touch...
+            if OPTIONS_LISTSHOWS_DESC_LEN< len(s['desc']):
+                print('...')
+            else:
+                print('')
+
+
+# MAIN
+########################################
+def main():
+    # Format the description
+    parserDesc = 'Rips a RTMP flux from one of the following services.\n'
+    for s in SOURCES:
+        parserDesc += ('\t' + s + ' (' + SOURCES[s].netloc +')\n')
+    parserDesc += 'Requires the rtmpdump tool.'
+
+    # Create the args parser
+    parser = argparse.ArgumentParser(description=parserDesc, formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument('url', nargs='?', help='The url (of the webpage where the player is)') 
+    parser.add_argument('-l', '--list', metavar='SOURCE', help='List available shows')
+
+    # Parse args
+    args = parser.parse_args()
+
+    # List shows
+    if args.list:
+        listshows(args.list)
+    else:
+    # Direct download
+        getfromplayer(args.url)
+
+# SCRIPT
+########################################
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exception:
+        print(exception)
+        sys.exit(1)
+
 
